@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bhoreal Seq</title>
+<style>
+  :root {
+    --bg: #111317;
+    --panel: #1b1e24;
+    --line: #2a2e36;
+    --text: #e8eaee;
+    --muted: #8a909c;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: .02em; }
+  .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  button {
+    font: inherit; color: var(--text); background: #2b3040; border: 1px solid #3a4152;
+    border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button:hover { background: #343a4d; }
+  #start { background: #2563eb; border-color: #2563eb; font-weight: 600; }
+  #start.hidden { display: none; }
+  .master { display: flex; align-items: center; gap: 12px; margin: 20px 0 8px; color: var(--muted); }
+  .master input { flex: 1; }
+  .pads { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 16px; }
+  .pad {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px; display: flex; flex-direction: column; gap: 10px; align-items: stretch;
+  }
+  .hit {
+    aspect-ratio: 1; border-radius: 10px; border: none; padding: 0;
+    background: var(--c); opacity: .28; transition: opacity .25s ease-out, transform .25s ease-out;
+  }
+  .hit.flash { opacity: 1; transform: scale(1.04); transition: none; }
+  .pad.muted .hit { filter: grayscale(1); opacity: .12; }
+  .name { font-weight: 600; text-align: center; }
+  .note { color: var(--muted); font-size: 12px; text-align: center; margin-top: -8px; }
+  .pad input[type=range] { width: 100%; }
+  .mute { padding: 4px 8px; font-size: 13px; }
+  .pad.muted .mute { background: #5b2330; border-color: #7f2d3e; }
+  h2 { font-size: 15px; margin: 28px 0 0; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .layer { display: flex; align-items: center; gap: 12px; }
+  .layer input[type=range] { width: 140px; }
+  .keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+  .key {
+    border: none; border-radius: 10px; height: 64px; font-weight: 600; color: #0b1a10;
+    background: #22c55e; opacity: .28; transition: opacity .25s ease-out;
+  }
+  .key.on { opacity: 1; transition: none; }
+  .keys.muted .key { filter: grayscale(1); opacity: .12; }
+  .log { margin-top: 24px; color: var(--muted); font: 12px/1.5 ui-monospace, Menlo, monospace; min-height: 4.5em; white-space: pre; overflow: hidden; }
+  .help { margin-top: 24px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+  @media (max-width: 560px) {
+    .pads { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Bhoreal Seq</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Àudio aturat</span></div>
+  </header>
+
+  <p><button id="start">Activa el so</button></p>
+
+  <div class="master">
+    <span>Volum</span>
+    <input id="master" type="range" min="0" max="1" step="0.01" value="0.8">
+  </div>
+
+  <h2>Bateria · canal 10</h2>
+  <div class="pads" id="pads"></div>
+
+  <h2>Melodia · canal 1</h2>
+  <div class="layer" style="margin-top:12px">
+    <span>Volum</span>
+    <input id="melodyVol" type="range" min="0" max="1" step="0.01" value="0.6">
+    <button class="mute" id="melodyMute">Silencia</button>
+  </div>
+  <div class="keys" id="keys"></div>
+
+  <div class="log" id="log"></div>
+
+  <div class="help">
+    Connecta el Bhoreal, prem <b>Activa el so</b> i dona permís per fer servir MIDI.
+    Cada nota que envia el seqüenciador sona aquí i il·lumina el pad o la tecla corresponent:
+    la bateria arriba pel canal 10 i la melodia (pentatònica de Do) pel canal 1.
+    També pots clicar pads i tecles per provar els sons. Funciona a Chrome i Edge (Safari no té Web MIDI).
+  </div>
+</main>
+
+<script>
+const TRACKS = [
+  { name: "Bombo",       note: 36, color: "#e53935" },
+  { name: "Caixa",       note: 38, color: "#fb8c00" },
+  { name: "Charles",     note: 42, color: "#fdd835" },
+  { name: "Charles obert", note: 46, color: "#26c6da" },
+  { name: "Palmes",      note: 39, color: "#d64fd6" },
+];
+
+const MELODY = [
+  { name: "Do", note: 60 },
+  { name: "Re", note: 62 },
+  { name: "Mi", note: 64 },
+  { name: "Sol", note: 67 },
+  { name: "La", note: 69 },
+];
+const DRUM_CHANNEL = 9;  // MIDI channel 10, 0-based
+
+let ctx = null;
+let master = null;
+let melodyGain = null;
+let melodyMuted = false;
+const voices = new Map();  // note -> { osc, gain } while the note is held
+let noiseBuffer = null;
+let openHatGain = null;   // so a closed hat can choke the open one
+const trackGain = [];
+const muted = TRACKS.map(() => false);
+
+// ---------- UI ----------
+
+const padsEl = document.getElementById("pads");
+const hitEls = [];
+TRACKS.forEach((t, i) => {
+  const pad = document.createElement("div");
+  pad.className = "pad";
+  pad.innerHTML = `
+    <button class="hit" style="--c:${t.color}" aria-label="${t.name}"></button>
+    <div class="name">${t.name}</div>
+    <div class="note">nota ${t.note}</div>
+    <input type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volum ${t.name}">
+    <button class="mute">Silencia</button>`;
+  const hit = pad.querySelector(".hit");
+  hit.addEventListener("pointerdown", () => { ensureAudio(); trigger(i, 100); });
+  pad.querySelector("input").addEventListener("input", e => {
+    if (trackGain[i]) trackGain[i].gain.value = +e.target.value;
+  });
+  pad.querySelector(".mute").addEventListener("click", e => {
+    muted[i] = !muted[i];
+    pad.classList.toggle("muted", muted[i]);
+    e.target.textContent = muted[i] ? "Activa" : "Silencia";
+  });
+  hitEls.push(hit);
+  padsEl.appendChild(pad);
+});
+
+const keysEl = document.getElementById("keys");
+const keyEls = new Map();
+MELODY.forEach(k => {
+  const key = document.createElement("button");
+  key.className = "key";
+  key.textContent = k.name;
+  key.addEventListener("pointerdown", () => { ensureAudio(); noteOn(k.note, 100); });
+  key.addEventListener("pointerup", () => noteOff(k.note));
+  key.addEventListener("pointerleave", () => noteOff(k.note));
+  keyEls.set(k.note, key);
+  keysEl.appendChild(key);
+});
+
+document.getElementById("melodyVol").addEventListener("input", e => {
+  if (melodyGain) melodyGain.gain.value = +e.target.value;
+});
+document.getElementById("melodyMute").addEventListener("click", e => {
+  melodyMuted = !melodyMuted;
+  keysEl.classList.toggle("muted", melodyMuted);
+  e.target.textContent = melodyMuted ? "Activa" : "Silencia";
+  if (melodyMuted) [...voices.keys()].forEach(noteOff);
+});
+
+document.getElementById("master").addEventListener("input", e => {
+  if (master) master.gain.value = +e.target.value;
+});
+
+const logEl = document.getElementById("log");
+const logLines = [];
+function log(text) {
+  logLines.unshift(text);
+  logLines.length = Math.min(logLines.length, 4);
+  logEl.textContent = logLines.join("\n");
+}
+
+function setStatus(text, state) {
+  document.getElementById("status").textContent = text;
+  document.getElementById("dot").className = "dot " + (state || "");
+}
+
+function flash(i) {
+  const el = hitEls[i];
+  el.classList.add("flash");
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("flash")));
+}
+
+// ---------- Audio ----------
+
+function ensureAudio() {
+  if (ctx) { if (ctx.state === "suspended") ctx.resume(); return; }
+  ctx = new AudioContext({ latencyHint: "interactive" });
+  master = ctx.createGain();
+  master.gain.value = +document.getElementById("master").value;
+  const comp = ctx.createDynamicsCompressor();
+  master.connect(comp).connect(ctx.destination);
+  document.querySelectorAll(".pad input[type=range]").forEach((el, i) => {
+    trackGain[i] = ctx.createGain();
+    trackGain[i].gain.value = +el.value;
+    trackGain[i].connect(master);
+  });
+  melodyGain = ctx.createGain();
+  melodyGain.gain.value = +document.getElementById("melodyVol").value;
+  melodyGain.connect(master);
+  noiseBuffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+}
+
+function noise() {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer;
+  return src;
+}
+
+function envelope(gainNode, t, peak, decay) {
+  gainNode.gain.setValueAtTime(peak, t);
+  gainNode.gain.exponentialRampToValueAtTime(0.001, t + decay);
+}
+
+function kick(out, t, v) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.frequency.setValueAtTime(150, t);
+  osc.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+  envelope(g, t, v, 0.45);
+  osc.connect(g).connect(out);
+  osc.start(t); osc.stop(t + 0.5);
+}
+
+function snare(out, t, v) {
+  const n = noise(), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+  hp.type = "highpass"; hp.frequency.value = 1200;
+  envelope(g, t, v * 0.8, 0.2);
+  n.connect(hp).connect(g).connect(out);
+  n.start(t); n.stop(t + 0.25);
+  const osc = ctx.createOscillator(), og = ctx.createGain();
+  osc.type = "triangle"; osc.frequency.setValueAtTime(190, t);
+  osc.frequency.exponentialRampToValueAtTime(120, t + 0.08);
+  envelope(og, t, v * 0.6, 0.1);
+  osc.connect(og).connect(out);
+  osc.start(t); osc.stop(t + 0.12);
+}
+
+function hat(out, t, v, decay) {
+  const n = noise(), hp = ctx.createBiquadFilter(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+  hp.type = "highpass"; hp.frequency.value = 7000;
+  bp.type = "bandpass"; bp.frequency.value = 10000; bp.Q.value = 0.8;
+  envelope(g, t, v * 0.5, decay);
+  n.connect(hp).connect(bp).connect(g).connect(out);
+  n.start(t); n.stop(t + decay + 0.02);
+  return g;
+}
+
+function clap(out, t, v) {
+  const n = noise(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+  bp.type = "bandpass"; bp.frequency.value = 1500; bp.Q.value = 1.2;
+  g.gain.setValueAtTime(0, t);
+  for (let k = 0; k < 3; k++) {             // three quick hand slaps
+    const s = t + k * 0.012;
+    g.gain.setValueAtTime(v, s);
+    g.gain.exponentialRampToValueAtTime(0.05, s + 0.01);
+  }
+  g.gain.setValueAtTime(v * 0.7, t + 0.036);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+  n.connect(bp).connect(g).connect(out);
+  n.start(t); n.stop(t + 0.3);
+}
+
+function trigger(i, velocity) {
+  flash(i);
+  if (!ctx || ctx.state !== "running" || muted[i]) return;
+  const t = ctx.currentTime;
+  const v = Math.max(0.05, velocity / 127);
+  const out = trackGain[i];
+  switch (i) {
+    case 0: kick(out, t, v); break;
+    case 1: snare(out, t, v); break;
+    case 2:
+      if (openHatGain) {                    // closed hat chokes the open hat
+        openHatGain.gain.cancelScheduledValues(t);
+        openHatGain.gain.setTargetAtTime(0, t, 0.01);
+        openHatGain = null;
+      }
+      hat(out, t, v, 0.05);
+      break;
+    case 3: openHatGain = hat(out, t, v, 0.45); break;
+    case 4: clap(out, t, v); break;
+  }
+}
+
+// Melody: two slightly detuned saws through a lowpass that closes after the
+// attack, so each step sounds like a soft pluck.
+function noteOn(note, velocity) {
+  noteOff(note);
+  const key = keyEls.get(note);
+  if (key) key.classList.add("on");
+  if (!ctx || ctx.state !== "running" || melodyMuted) return;
+  const t = ctx.currentTime;
+  const freq = 440 * Math.pow(2, (note - 69) / 12);
+  const v = Math.max(0.05, velocity / 127) * 0.35;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.Q.value = 4;
+  filter.frequency.setValueAtTime(freq * 8, t);
+  filter.frequency.exponentialRampToValueAtTime(freq * 2, t + 0.25);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(v, t + 0.005);
+  gain.gain.setTargetAtTime(v * 0.6, t + 0.005, 0.1);
+  const oscs = [-6, 6].map(cents => {
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.value = freq;
+    osc.detune.value = cents;
+    osc.connect(filter);
+    osc.start(t);
+    return osc;
+  });
+  filter.connect(gain).connect(melodyGain);
+  voices.set(note, { oscs, gain });
+}
+
+function noteOff(note) {
+  const key = keyEls.get(note);
+  if (key) key.classList.remove("on");
+  const voice = voices.get(note);
+  if (!voice) return;
+  voices.delete(note);
+  const t = ctx.currentTime;
+  voice.gain.gain.cancelScheduledValues(t);
+  voice.gain.gain.setTargetAtTime(0, t, 0.06);
+  voice.oscs.forEach(osc => osc.stop(t + 0.4));
+}
+
+// ---------- MIDI ----------
+
+const noteToTrack = new Map(TRACKS.map((t, i) => [t.note, i]));
+const melodyNames = new Map(MELODY.map(k => [k.note, k.name]));
+
+function onMidi(e) {
+  const [status, note, vel] = e.data;
+  const type = status & 0xf0, channel = status & 0x0f;
+  const isOn = type === 0x90 && vel > 0;
+  const isOff = type === 0x80 || (type === 0x90 && vel === 0);
+  if (!isOn && !isOff) return;
+
+  if (channel === DRUM_CHANNEL) {
+    const i = noteToTrack.get(note);
+    if (i === undefined || !isOn) return;
+    trigger(i, vel);
+    log(`${TRACKS[i].name.padEnd(14)} nota ${note}  vel ${vel}  canal ${channel + 1}`);
+  } else if (isOn) {
+    noteOn(note, vel);
+    log(`${("Melodia " + (melodyNames.get(note) || "")).padEnd(14)} nota ${note}  vel ${vel}  canal ${channel + 1}`);
+  } else {
+    noteOff(note);
+  }
+}
+
+function connectInputs(access) {
+  const names = [];
+  for (const input of access.inputs.values()) {
+    input.onmidimessage = onMidi;
+    names.push(input.name);
+  }
+  const bhoreal = names.find(n => /bhoreal/i.test(n));
+  if (bhoreal) setStatus(`Connectat: ${bhoreal}`, "ok");
+  else if (names.length) setStatus(`Escoltant: ${names.join(", ")} (Bhoreal no trobat)`, "warn");
+  else setStatus("Cap dispositiu MIDI", "warn");
+}
+
+document.getElementById("start").addEventListener("click", async e => {
+  ensureAudio();
+  e.target.classList.add("hidden");
+  if (!navigator.requestMIDIAccess) {
+    setStatus("Aquest navegador no té Web MIDI. Fes servir Chrome o Edge.", "bad");
+    return;
+  }
+  try {
+    const access = await navigator.requestMIDIAccess();
+    connectInputs(access);
+    access.onstatechange = () => connectInputs(access);
+  } catch (err) {
+    setStatus("Sense permís MIDI: " + err.message, "bad");
+  }
+});
+</script>
+</body>
+</html>
